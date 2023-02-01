@@ -1,0 +1,300 @@
+import random
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.proxy import Proxy, ProxyType
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from random import randrange, randint
+import json
+import requests
+import json
+import threading
+import openai
+import time
+
+class SurveyJunkieRun:
+
+    def __init__(self, proxy: str = None, api_key: str = None):
+        print(proxy)
+        self.driver = Driver(proxy, api_key)
+        self.driver.initialize_account()
+
+class GPTClient:
+
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        openai.api_key = self.api_key
+
+    def send_message(self, _prompt: str) -> str:
+
+        response = openai.Completion.create(
+            model="text-davinci-003",
+            prompt=_prompt,
+            temperature=0.69,
+            max_tokens=300,
+            top_p=1,
+            frequency_penalty=0,
+            presence_penalty=0
+        )
+
+        response_value = response["choices"][0]["text"]
+
+        return str(response_value.replace('"', ''))
+
+class ProxyLookup:
+    def __init__(self, _proxy: str, url: str = 'https://www.iplocation.net/get-ipdata'):
+        self.url = url
+        self.proxy = _proxy
+
+    def ip_postal(self):
+
+        proxy_no_port = self.proxy[:self.proxy.find(':')]
+
+        data = {
+            'ip': proxy_no_port,
+            'source': 'ipinfo',
+            'ipv': '4',
+        }
+
+        postal = json.loads(requests.post('https://www.iplocation.net/get-ipdata', data=data).text)['res']['postal']
+        time.sleep(3)
+        return postal
+
+class Driver(GPTClient):
+    def __init__(self, _proxy: str, api_key: str):
+        super().__init__(api_key)
+        self.email = None
+        self.driver = webdriver.Chrome('C:/Program Files/chromedriver.exe')
+        self.actions = ActionChains(self.driver)
+        self.proxy = _proxy
+        self.driver_wait = WebDriverWait(self.driver, 10)
+        self.long_driver_wait = WebDriverWait(self.driver, 1000)
+        self.handles = self.driver.window_handles
+
+        if _proxy is None:
+            proxy = Proxy({
+                'proxyType': ProxyType.MANUAL,
+                'httpProxy': _proxy,
+                'sslProxy': _proxy
+            })
+
+            capabilities = webdriver.DesiredCapabilities.CHROME
+            proxy.add_to_capabilities(capabilities)
+
+        urls = ['https://www.surveyjunkie.com/?sign-up', 'https://tempail.com/en/']
+
+        self.driver_get_urls(urls)
+
+    def create_password(self, length: int) -> str:
+
+        password_chars = '!@#$%&?abcdefghijklmnopqrstuvwxyz'
+        password = ''
+
+        for x in range(length):
+
+            random_int = randint(0, len(password_chars) - 1)
+            new_char = password_chars[random_int]
+            if random_int > 6:
+                if randint(0, 1) == 0:
+                    new_char = password_chars[random_int].upper()
+            else:
+                new_char = password_chars[random_int]
+
+            password += new_char
+
+        return str(password)
+
+    def get_postal(self):
+        return ProxyLookup(_proxy=self.proxy).ip_postal()
+
+    def driver_get_urls(self, urls: list):
+
+        if len(urls) < 2:
+            try:
+                self.driver.get(urls[0])
+            except Exception as e:
+                pass
+        else:
+            for x in range(len(urls)):
+                self.driver.execute_script(f"window.open('{urls[x]}', '_blank');")
+
+            self.driver.switch_to.window(self.handles[0])
+            self.driver.close()
+            time.sleep(1)
+            self.handles = self.driver.window_handles
+            time.sleep(1)
+
+    def click_next_survey(self):
+        pass
+
+    def get_temp_email(self):
+        self.driver.switch_to.window(self.handles[0])
+        self.long_driver_wait.until(EC.element_to_be_clickable((By.XPATH, "//*[@id='eposta_adres']")))
+        temp_email = self.driver.find_element(By.XPATH, "//*[@id='eposta_adres']").get_attribute('value')
+        self.driver.switch_to.window(self.handles[1])
+        return temp_email
+
+    def signup(self, email):
+        time.sleep(3)
+        self.driver.find_element(By.XPATH, "//*[@id='onetrust-accept-btn-handler']").click()
+        time.sleep(3)
+        signup_box = self.driver.find_element(By.XPATH, "//*[@class='sign-up-popup']")
+        input_email = signup_box.find_element(By.XPATH, ".//*[@name='email']")
+        check_box = self.driver.find_element(By.XPATH, ".//*[@id='terms-checkbox']")
+        signup_button = signup_box.find_element(By.XPATH, ".//*[@class='join-now']")
+        input_email.send_keys(self.email)
+        check_box.click()
+        signup_button.click()
+
+    def profile_settup(self):
+        names = []
+
+        with open('names.txt', 'r', encoding='utf-8') as f:
+            names_list = f.read().split()
+            names = [names_list[randint(0, len(names_list)-1)] for x in range(2)]
+
+        self.driver_wait.until(EC.element_to_be_clickable((By.XPATH, "//*[@class='next-slide-button new-onboarding']")))
+        buttons = self.driver.find_elements(By.XPATH, "//*[@class='next-slide-button new-onboarding']")
+        buttons[0].click()
+        self.driver_wait.until(EC.element_to_be_clickable((By.XPATH, "//*[@id='addr_zip']")))
+        self.driver.find_element(By.XPATH, "//*[@id='addr_zip']").send_keys('35749')
+        buttons[3].click()
+        self.driver_wait.until(EC.element_to_be_clickable(buttons[4]))
+        buttons[4].click()
+        self.driver_wait.until(EC.element_to_be_clickable(buttons[1]))
+        date_buttons = self.driver.find_elements(By.XPATH, '//*[@class="frm_select"]')[:3]
+        date_buttons_options = [element.find_elements(By.XPATH, "./*")[:50] for element in date_buttons]
+        x = 0
+        while x < len(date_buttons_options):
+            date_buttons[x].click()
+            self.driver_wait.until(EC.element_to_be_clickable(date_buttons_options[x][1]))
+            date_buttons_options[x][randrange(1, len(date_buttons_options[x]) - 1)].click()
+            x += 1
+        buttons[1].click()
+        self.driver_wait.until(EC.element_to_be_clickable((By.XPATH, "//*[@class='radio_title']")))
+        gender = self.driver.find_elements(By.XPATH, "//*[@class='radio_title']")[randint(0, 1)]
+        gender.click()
+        buttons[2].click()
+        personal_info_inputs = self.driver.find_elements(By.XPATH, "//*[@class='input_field']")
+        personal_info_inputs.remove(personal_info_inputs[2])
+
+        for x in range(3):
+            if x != 2:
+                personal_info_inputs[x].send_keys(names[x])
+            else:
+                personal_info_inputs[x].send_keys(self.create_password(11))
+
+        self.driver.find_element(By.XPATH, "//*[@class='grn_submit next-slide-button new-onboarding hide-coreg']").click()
+
+    def get_title(self) -> str:
+        return self.driver.find_element(By.XPATH, "//*[@class='q-popup-title ng-binding']").text.lower()
+
+    def get_answers(self):
+        buttons = self.driver.find_elements(By.XPATH, "//*[@class='q-popup-answer-option ng-binding ng-scope']")
+        buttons = buttons + self.driver.find_elements(By.XPATH, "//*[@class='q-popup-answer-option']")
+        print(buttons)
+
+        check_marks = [button.find_element(By.XPATH, ".//*[@class='q-popup-answer-select']") for button in buttons]
+        answers_dict = {buttons[x].text.lower(): [buttons[x], check_marks[x]] for x in range(len(buttons))}
+
+        print(answers_dict)
+
+        if len(buttons) >= 7:
+            return dict(list(answers_dict.items())[:7])
+
+        return answers_dict
+
+    def is_multi_response(self):
+        response = self.send_message(f"I'm taking an online survey. The question is: {self.get_title()}. Is this question asking for multiple responses or one response? Answer with either the word multiple or single").lower()
+        if 'multiple' in response:
+            return True
+        return False
+
+    def get_page_type(self):
+        multi_response = self.is_multi_response()
+
+        if multi_response is True:
+            return 'choose multiple'
+
+        elif multi_response is False:
+            return 'choose one'
+
+    def get_page(self):
+        return [self.get_title(), self.get_answers()]
+
+    def continue_button(self):
+        return self.driver.find_element(By.XPATH, "//*[@ng-hide='QCtrl.model.currentQuestion === QCtrl.getQuestionCount()']")
+
+    def get_page_num(self):
+        try:
+            num_list = str(self.driver.find_element(By.XPATH, "//*[@ng-hide='QCtrl.model.isDynamicQuestionnaire']").text.replace(' of ', ':')).split(':')
+            return [int(num) for num in num_list]
+        except:
+            return [None, None]
+
+    def get_solution(self):
+        is_multi_response = self.is_multi_response()
+        page_data = self.get_page()
+        answer = ''
+        options = ''
+        for option in page_data[1]:
+            options += str(option) + ','
+
+        if is_multi_response:
+            message = f'Answer this multiple choice question with one or more answers. The question is: "{page_data[0]}". The answers are: "{options}". Seperate the answers with a colon. Type the exact answer exactly as it was written.'
+        else:
+            message = f'Answer this multiple choice question with a single answer. The question is: "{page_data[0]}". The answers are: "{options}". Type the exact answer exactly as it was written.'
+
+        answers = self.send_message(message).lower()
+
+        print(message)
+
+        answers = answers.replace('\n', '')
+        answers = answers.replace('.', '')
+        answers = answers.split(':')
+
+        print(answers)
+
+        for answer in answers:
+            try:
+                for item in page_data[1]:
+                    if item in answer or answer in item:
+                        page_data[1][item][1].click()
+            except Exception as e:
+                print(f":{e}:")
+
+        time.sleep(2)
+
+    def general_profile(self):
+        self.driver_wait.until(EC.element_to_be_clickable((By.XPATH, "//*[@ng-click='startDemographicQuestionnaire(true);']")))
+        self.driver.find_element(By.XPATH, "//*[@ng-click='startDemographicQuestionnaire(true);']").click()
+        self.driver_wait.until(EC.element_to_be_clickable((By.XPATH, "//*[@class='q-popup-title ng-binding']")))
+        counter = self.get_page_num()[1]
+        page_num = 1
+        while isinstance(page_num, int):
+
+            page_num = self.get_page_num()[0]
+
+            print(page_num)
+
+            try:
+                self.get_solution()
+            except Exception as e:
+                print(e)
+
+            try:
+                self.continue_button().click()
+
+            except Exception as e:
+                print('Button is hidden')
+
+            time.sleep(2)
+
+            print(counter, ' : ', page_num)
+
+    def initialize_account(self):
+        self.email = self.get_temp_email()
+        self.signup(self.email)
+        self.profile_settup()
+        self.general_profile()
